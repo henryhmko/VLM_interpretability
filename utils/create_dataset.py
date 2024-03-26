@@ -159,11 +159,15 @@ def run(input_dir,
         rand_font_size = True # bool for randomizing font size
         ):
     # Check input_dir is a valid directory
-    assert os.path.exists(input_dir)
+    cur_dir = os.path.dirname(os.getcwd())
+    input_dir = os.path.join(cur_dir, input_dir)
+    assert os.path.exists(input_dir), f"Input Path is invalid: {input_dir}"
+    assert output_dir[0] != "/", f"Output Path is invalid: Does your path start with '/'?"
     # Check output_dir exists; create output_dir if it does not exist
-    output_imgdir = os.path.join(output_dir, 'images')
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    new_output_dir = os.path.join(cur_dir, output_dir)
+    output_imgdir = os.path.join(new_output_dir, 'images')
+    if not os.path.exists(new_output_dir):
+        os.makedirs(new_output_dir)
         # Also create dir for the new images
         os.makedirs(output_imgdir)
     # Create array to store all labels that will go into labels.json
@@ -185,7 +189,7 @@ def run(input_dir,
         
     # Dump all labels array into labels.json
     json_file_name = 'labels.json'
-    json_file_path = os.path.join(output_dir, json_file_name)
+    json_file_path = os.path.join(new_output_dir, json_file_name)
     with open(json_file_path, 'w') as file:
         json.dump(json_arr, file, indent=4)
 
