@@ -30,3 +30,13 @@ Note that `create_dataset.py` can take the following additional arguments in arg
   - `rand_position`: bool determining randomized position. Default is `True`
   - `rand_rotation`: bool determining randomized rotation. Default is `True`
   - `rand_font_size`: bool determining randomized font size. Default is `True`
+
+## Adding New Datasets
+If you have a small dataset that would be useful, follow the directions below to have it added into `compressed_datasets`
+```bash
+python compress_datasets.py -i <ENTER_PATH_TO_DATASET>
+cd ..
+# git lfs will be used to track large files. However, make sure the zipfile is under 500MB
+git lfs track utils/compressed_datasets/<NAME_OF_DATASET_ZIPFILE>
+# git commit and push
+```
