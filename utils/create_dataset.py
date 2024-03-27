@@ -81,6 +81,7 @@ def place_text_on_img(img_path,
                       rand_position,
                       rand_rotation,
                       rand_font_size,
+                      rand_color,
                       img_size = 400,
                       min_font_size = 30,
                       max_font_size = 100
@@ -128,7 +129,12 @@ def place_text_on_img(img_path,
             angle = 0 # Fix angle to 0 if not rand
         
         # Choose color; color is set to white by default.
-        r, g, b = 255, 255, 255
+        if rand_color:
+            r = random.randint(0, 255)
+            g = random.randint(0, 255)
+            b = random.randint(0, 255)
+        else:
+            r, g, b = 255, 255, 255
 
         # Overlay new mask to place text on top of
         # Create a new blank canvas
@@ -158,7 +164,8 @@ def run(input_dir,
         words,
         rand_position = True, # bool for randomizing position
         rand_rotation = True, # bool for randomizing rotation
-        rand_font_size = True # bool for randomizing font size
+        rand_font_size = True, # bool for randomizing font size
+        rand_color = True # bool for randomizing color
         ):
     # Check input_dir is a valid directory
     cur_dir = os.path.dirname(os.getcwd())
@@ -182,10 +189,14 @@ def run(input_dir,
     for img_path in tqdm(img_paths, desc="Processing Images"):
         # Choose random word to place on text
         rand_word = random.choice(words)
-        img_with_text, labels_dict = place_text_on_img(img_path, rand_word, rand_position, rand_rotation, rand_font_size)
+        img_with_text, labels_dict = place_text_on_img(img_path, rand_word, rand_position, rand_rotation, rand_font_size, rand_color)
         
         # Save img_with_text to output_dir and append labels to array storing all labels
         new_img_name = f"with_text_{os.path.basename(img_path)}"
+        file_extension_type = os.path.splitext(new_img_name)[-1]
+        # If .jpeg, change to png. Conversion is necessary to save images of RGBA format
+        if file_extension_type.lower() == '.jpeg':
+            new_img_name = new_img_name[:-5] + '.png'
         output_img_path = os.path.join(output_imgdir, new_img_name)
         img_with_text.save(output_img_path)
         json_arr.append(labels_dict)
@@ -236,6 +247,12 @@ if __name__ == "__main__":
         default=True,
         help = "boolean for randomizing font size. Set to False if fixed."
     )
+    parser.add_argument(
+        "--rand_color",
+        type = bool,
+        default=True,
+        help = "boolean for randomizing color. Set to False if fixed."
+    )
 
     args = parser.parse_args()
 
@@ -246,4 +263,5 @@ if __name__ == "__main__":
         words,
         args.rand_position,
         args.rand_rotation,
-        args.rand_font_size)
+        args.rand_font_size,
+        args.rand_color)

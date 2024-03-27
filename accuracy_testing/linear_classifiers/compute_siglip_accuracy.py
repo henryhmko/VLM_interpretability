@@ -126,10 +126,11 @@ def run(input_dir):
         accuracy = (predicted == val_labels.to(device)).sum().item() / len(val_labels)
         print(f"Validation Accuracy: {accuracy:.4f}")
     
-    
+
 
 if __name__ == "__main__":
-    input_path = '/home/ko.hyeonmok/local_testing/VLM_interpretability/data/doggos_randomized_sorted/'
+    input_path = '/home/ko.hyeonmok/local_testing/VLM_interpretability/data/tinyimagenet_long_words/'
+    print(input_path)
     run(input_path)
 
 # image_file = '/home/ko.hyeonmok/local_testing/VLM_interpretability/data/doggos_randomized/images/with_text_ILSVRC2012_val_00001968.png'
