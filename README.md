@@ -23,7 +23,7 @@ python decompress_datasets.py -i compressed_datasets/doggos_notext.zip
 
 ### 2. Create new dataset
 ```bash
-python create_dataset.py -i data/doggos_notext/train -o /data/<ENTER__NEW_NAME>
+python create_dataset.py -i data/doggos_notext/train -o data/<ENTER__NEW_NAME>
 # Now the new dataset is stored /data
 ```
 Note that `create_dataset.py` can take the following additional arguments in argparse:

@@ -176,6 +176,7 @@ def run(input_dir,
     # Get all image paths
     img_paths = get_img_paths(input_dir)
 
+    print("Creating Dataset...")
     for img_path in tqdm(img_paths, desc="Processing Images"):
         # Choose random word to place on text
         rand_word = random.choice(words)
@@ -192,6 +193,7 @@ def run(input_dir,
     json_file_path = os.path.join(new_output_dir, json_file_name)
     with open(json_file_path, 'w') as file:
         json.dump(json_arr, file, indent=4)
+    print("Creation Complete!")
 
 
 
