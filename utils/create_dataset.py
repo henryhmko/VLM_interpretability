@@ -17,6 +17,8 @@ def get_img_paths(input_dir):
     Returns all image paths in the given directory.'''
     images = os.listdir(input_dir)
     images = [os.path.join(input_dir, img_path) for img_path in images if not img_path.startswith('.')]
+    # Sorting images is needed to keep a consistent order
+    images = sorted(images)
     return images
     
 
