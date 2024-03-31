@@ -94,7 +94,7 @@ def run(input_dir):
     embedding_size = embeddings_matrix.shape[1]
     num_classes = len(torch.unique(labels_matrix))
     learning_rate = 0.003
-    num_epochs = 50
+    num_epochs = 1000
 
     model = LinearClassifier(embedding_size, num_classes).to(device)
 
@@ -105,6 +105,9 @@ def run(input_dir):
     # Training loop
     # for epoch in tqdm(range(num_epochs), desc="Model Training..."):
     for epoch in range(num_epochs):
+        # Reset model back to training mode
+        model.train() 
+
         # Forward pass
         outputs = model(train_embeddings.to(device))
         loss = criterion(outputs, nn.functional.one_hot(train_labels.to(device), num_classes=num_classes).float())
@@ -114,8 +117,17 @@ def run(input_dir):
         loss.backward()
         optimizer.step()
 
+        # Evaluate training accuracy
+        model.eval()  # Set the model to evaluation mode
+        with torch.no_grad():
+            train_outputs = model(train_embeddings.to(device))
+            _, train_predicted = torch.max(train_outputs.data, 1)
+            train_accuracy = (train_predicted == train_labels.to(device)).sum().item() / len(train_labels)
+
         # Print Loss
-        print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}")
+        # print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}")
+        print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}, Training Accuracy: {train_accuracy:.4f}")
+
     print("Model Training Complete.")
     print("Starting Evaluation.")
 
@@ -132,13 +144,3 @@ if __name__ == "__main__":
     input_path = '/home/ko.hyeonmok/local_testing/VLM_interpretability/data/tinyimagenet_long_words/'
     print(input_path)
     run(input_path)
-
-# image_file = '/home/ko.hyeonmok/local_testing/VLM_interpretability/data/doggos_randomized/images/with_text_ILSVRC2012_val_00001968.png'
-# image_file = '/home/ko.hyeonmok/local_testing/VLM_interpretability/data/doggos_randomized/images/with_text_n02102040_334.png'
-
-
-# embeddings = get_image_embeddings(image_file)
-
-# print(embeddings)
-# print(embeddings.shape)
-# print(embeddings.size())
