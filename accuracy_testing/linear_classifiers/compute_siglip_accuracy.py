@@ -7,6 +7,7 @@ from transformers import AutoProcessor, AutoModel
 import os
 from tqdm.auto import tqdm
 import json
+import matplotlib.pyplot as plt
 
 '''See at how text is recognized by looking at embeddings of an image with text on them. 
 1. Feed images through SigLip encoder
@@ -71,7 +72,6 @@ def run(input_dir):
     print("Generated All Image Labels.")
 
     # Build and train linear classifier
-    # Err..would be good to separate these into separate files later..
     
     # Separate train-test split
     train_embeddings, val_embeddings, train_labels, val_labels = train_test_split(
@@ -87,7 +87,6 @@ def run(input_dir):
         def forward(self, x):
             # Just returning fc layer without sigmoid since we use nn.BCEWithLogits
             return self.fc(x)
-            # return torch.sigmoid(self.fc(x))
     
     # Set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -96,17 +95,19 @@ def run(input_dir):
     embedding_size = embeddings_matrix.shape[1]
     num_classes = len(torch.unique(labels_matrix))
     learning_rate = 0.003
-    num_epochs = 500
+    num_epochs = 1500
 
     model = LinearClassifier(embedding_size, num_classes).to(device)
 
     # Define the loss function and optimizer
-    # criterion = nn.MultiLabelSoftMarginLoss()
     criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     # Training loop
-    # for epoch in tqdm(range(num_epochs), desc="Model Training..."):
+    train_accuracies = []
+    val_accuracies = []
+    epochs = []
+    
     for epoch in range(num_epochs):
         # Reset model back to training mode
         model.train() 
@@ -122,29 +123,35 @@ def run(input_dir):
 
         # Evaluate training accuracy
         model.eval()  # Set the model to evaluation mode
-        with torch.no_grad():
-            train_outputs = model(train_embeddings.to(device))
-            # _, train_predicted = torch.max(train_outputs.data, 1)
-            train_predicted = torch.argmax(torch.sigmoid(train_outputs), dim=1)
-            train_accuracy = (train_predicted == train_labels.to(device)).sum().item() / len(train_labels)
 
-        # Print Loss
-        # print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}")
-        print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}, Training Accuracy: {train_accuracy:.4f}")
+        if epoch % 50 == 0: # Record validation accuracy for every 50 epochs
+            epochs.append(epoch)
+            with torch.no_grad():
+                train_outputs = model(train_embeddings.to(device))
+                train_predicted = torch.argmax(torch.sigmoid(train_outputs), dim=1)
+                train_accuracy = (train_predicted == train_labels.to(device)).sum().item() / len(train_labels)
+                train_accuracies.append(train_accuracy)
+
+                # Evaluate the model on the validation set
+                outputs = model(val_embeddings.to(device))
+                predicted = torch.argmax(torch.sigmoid(outputs), dim=1)
+                val_accuracy = (predicted == val_labels.to(device)).sum().item() / len(val_labels)
+                val_accuracies.append(val_accuracy)
+
+                print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}, Training Accuracy: {train_accuracy:.4f}, Val Accuracy: {val_accuracy:.4f}")
 
     print("Model Training Complete.")
-    print("Starting Evaluation.")
 
-    # Evaluate the model on the validation set
-    with torch.no_grad():
-        outputs = model(val_embeddings.to(device))
-        # _, predicted = torch.max(outputs.data, 1)
-        predicted = torch.argmax(torch.sigmoid(outputs), dim=1)
-        accuracy = (predicted == val_labels.to(device)).sum().item() / len(val_labels)
-        print(f"Validation Accuracy: {accuracy:.4f}")
+    # Create plot for training and validation accuracies
+    plt.figure()
+    plt.plot(epochs, train_accuracies, label="Training Accuracy")
+    plt.plot(epochs, val_accuracies, label="Validation Accuracy")
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.legend()
+    plt.show()
+    plt.savefig("accuracy_plot.png")
     
-
-
 if __name__ == "__main__":
     input_path = '/home/ko.hyeonmok/local_testing/VLM_interpretability/data/tinyimagenet_long_words/'
     print(input_path)
