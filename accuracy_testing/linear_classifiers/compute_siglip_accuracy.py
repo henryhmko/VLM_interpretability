@@ -85,7 +85,9 @@ def run(input_dir):
             self.fc = nn.Linear(embedding_size, num_classes)
 
         def forward(self, x):
-            return torch.sigmoid(self.fc(x))
+            # Just returning fc layer without sigmoid since we use nn.BCEWithLogits
+            return self.fc(x)
+            # return torch.sigmoid(self.fc(x))
     
     # Set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -94,12 +96,13 @@ def run(input_dir):
     embedding_size = embeddings_matrix.shape[1]
     num_classes = len(torch.unique(labels_matrix))
     learning_rate = 0.003
-    num_epochs = 1000
+    num_epochs = 500
 
     model = LinearClassifier(embedding_size, num_classes).to(device)
 
     # Define the loss function and optimizer
-    criterion = nn.MultiLabelSoftMarginLoss()
+    # criterion = nn.MultiLabelSoftMarginLoss()
+    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     # Training loop
@@ -121,7 +124,8 @@ def run(input_dir):
         model.eval()  # Set the model to evaluation mode
         with torch.no_grad():
             train_outputs = model(train_embeddings.to(device))
-            _, train_predicted = torch.max(train_outputs.data, 1)
+            # _, train_predicted = torch.max(train_outputs.data, 1)
+            train_predicted = torch.argmax(torch.sigmoid(train_outputs), dim=1)
             train_accuracy = (train_predicted == train_labels.to(device)).sum().item() / len(train_labels)
 
         # Print Loss
@@ -134,7 +138,8 @@ def run(input_dir):
     # Evaluate the model on the validation set
     with torch.no_grad():
         outputs = model(val_embeddings.to(device))
-        _, predicted = torch.max(outputs.data, 1)
+        # _, predicted = torch.max(outputs.data, 1)
+        predicted = torch.argmax(torch.sigmoid(outputs), dim=1)
         accuracy = (predicted == val_labels.to(device)).sum().item() / len(val_labels)
         print(f"Validation Accuracy: {accuracy:.4f}")
     
