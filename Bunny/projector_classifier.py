@@ -72,9 +72,18 @@ if 1:
         prompt = params["prompt"]
 
         images = params.get("images", None)
-        images = process_images(images, image_processor, model.config)
+        # images = process_images(images, image_processor, model.config)
+        images = process_images(images, image_processor, self.model.modules.config)
         # Holy this would be so slow. There is 0 batching of images being done -> #TODO: err fix later when i get the pipeline working first
-        images = images.to(self.model.device, dtype=model.dtype)
+        images = images.to(dtype=model.dtype)
+        # images = images.to(self.model.device, dtype=model.dtype)
+
+        # self.model = Model(input_size, output_size)
+        if torch.cuda.device_count() > 1:
+            print("Let's use", torch.cuda.device_count(), "GPUs!")
+            # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
+            self.model = nn.DataParallel(self.model)
+            # model.to(device)
 
         input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).to(
             self.device)
@@ -244,8 +253,10 @@ def get_all_labels(input_fp):
     # Convert label strings("cat", "fox",...) into class numbers(e.g. 0, 1, 2,...)
     integer_labels = [label_mapping[label] for label in labels_strings]
     # Convert label matrix to tensor
-    labels = torch.tensor(integer_labels)
-    return labels
+    labels = torch.tensor(integer_labels).to(torch.float16)
+    print(f"label dtype: {labels.dtype}")
+    return labels[:350]
+    # return labels[:350].to(torch.float16)
 
 
 #@wrap
@@ -269,6 +280,7 @@ def run(input_path):
             
     img_paths = [os.path.join(img_dir_path, img_path) for img_path in img_paths if not img_path.startswith('.')] # Concatenate input_path to each file name (i.e. create full img path names)
     img_paths.sort() # And sort them
+    img_paths = img_paths[:350] # Half them
     print(f"Number of images: {len(img_paths)}") # Print number of images as sanity check
 
     question = "What is the one word you see on the image, if any? Dummy prompt"
@@ -295,8 +307,12 @@ def run(input_path):
         # Append each embedding to the total embeddings matrix
         embeddings_lst.append(embedding)
 
+    embeddings_lst = embeddings_lst
+    # labels[:350].to(torch.float16)d
+    # embeddings_lst = embeddings_lst.to(torch.float16)
     #convert embeddigns lst into a tensor
     embeddings_matrix = torch.cat(embeddings_lst, dim=0)
+    print(f"embedding dtype: {embeddings_matrix.dtype}")
     print("Generated All Image Embeddings.")
     
     # get all labels
@@ -305,6 +321,8 @@ def run(input_path):
     print("Generated All Image Labels.")
 
     # Separate train-test split
+    # labels_dtype = labels_matrix.dtype
+    # embeddings_matrix = embeddings_matrix.to(labels_dtype)
     train_embeddings, val_embeddings, train_labels, val_labels = train_test_split(
         embeddings_matrix, labels_matrix, test_size=0.2
     )
@@ -317,12 +335,105 @@ def run(input_path):
 
         def forward(self, x):
             # Just returning fc layer without sigmoid since we use nn.BCEWithLogits
+            print(f"input dtype is: {x.dtype}")
+            print(f"weight dtype is: {self.fc.weight.dtype}")
+            # x = x.to(self.fc.weight.dtype)
+            self.fc.weight = self.fc.weight.to(x.dtype)
+            self.fc.bias = self.fc.bias.to(x.dtype)
             return self.fc(x)
+            
 
 
-    # NEW SCHEME
+    # # NEW SCHEME
+    # # Set device
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # # Set the hyperparameters
+    # embedding_size = embeddings_matrix.shape[1]
+    # num_classes = len(torch.unique(labels_matrix))
+    # learning_rate = 0.003
+    # num_epochs = 1500
+
+    # # Split the embeddings and labels into chunks
+    # chunk_size = 350  # 2070ti could hold ~376.72 chunks
+    # train_embeddings_chunks = torch.split(train_embeddings, chunk_size)
+    # val_embeddings_chunks = torch.split(val_embeddings, chunk_size)
+    # train_labels_chunks = torch.split(train_labels, chunk_size)
+    # val_labels_chunks = torch.split(val_labels, chunk_size)
+
+    # # Create a separate model for each chunk
+    # models = []
+    # for _ in range(len(train_embeddings_chunks)):
+    #     model = LinearClassifier(embedding_size, num_classes).to(device)
+    #     models.append(model)
+
+    # # Define the loss function and optimizer for each model
+    # criterion = nn.BCEWithLogitsLoss()
+    # optimizers = [optim.Adam(model.parameters(), lr=learning_rate) for model in models]
+
+    # # Training loop
+    # train_accuracies = []
+    # val_accuracies = []
+    # epochs = []
+
+    # for epoch in range(num_epochs):
+    #     for model in models:
+    #         model.train()  # Set the model to training mode
+
+    #     for i in range(len(train_embeddings_chunks)):
+    #         train_embeddings_chunk = train_embeddings_chunks[i].to(device)
+    #         train_labels_chunk = train_labels_chunks[i].to(device)
+    #         model = models[i]
+    #         optimizer = optimizers[i]
+
+    #         # Forward pass
+    #         outputs = model(train_embeddings_chunk)
+    #         loss = criterion(outputs, nn.functional.one_hot(train_labels_chunk, num_classes=num_classes).float())
+
+    #         # Backward pass and optimization
+    #         optimizer.zero_grad()
+    #         loss.backward()
+    #         optimizer.step()
+
+    #     if epoch % 50 == 0:  # Record validation accuracy for every 50 epochs
+    #         epochs.append(epoch)
+    #         train_accuracy = 0.0
+    #         val_accuracy = 0.0
+
+    #         with torch.no_grad():
+    #             for i in range(len(train_embeddings_chunks)):
+    #                 train_embeddings_chunk = train_embeddings_chunks[i].to(device)
+    #                 train_labels_chunk = train_labels_chunks[i].to(device)
+    #                 model = models[i]
+    #                 model.eval()  # Set the model to evaluation mode
+
+    #                 train_outputs = model(train_embeddings_chunk)
+    #                 train_predicted = torch.argmax(torch.sigmoid(train_outputs), dim=1)
+    #                 train_accuracy += (train_predicted == train_labels_chunk).sum().item()
+
+    #             train_accuracy /= len(train_labels)
+    #             train_accuracies.append(train_accuracy)
+
+    #             for i in range(len(val_embeddings_chunks)):
+    #                 val_embeddings_chunk = val_embeddings_chunks[i].to(device)
+    #                 val_labels_chunk = val_labels_chunks[i].to(device)
+    #                 model = models[i]
+    #                 model.eval()  # Set the model to evaluation mode
+
+    #                 outputs = model(val_embeddings_chunk)
+    #                 predicted = torch.argmax(torch.sigmoid(outputs), dim=1)
+    #                 val_accuracy += (predicted == val_labels_chunk).sum().item()
+
+    #             val_accuracy /= len(val_labels)
+    #             val_accuracies.append(val_accuracy)
+
+    #             print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}, Training Accuracy: {train_accuracy:.4f}, Val Accuracy: {val_accuracy:.4f}")
+    # # END OF NEW SCHEME
+             
     # Set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    torch.cuda.empty_cache() #clear memory
+
 
     # Set the hyperparameters
     embedding_size = embeddings_matrix.shape[1]
@@ -330,145 +441,60 @@ def run(input_path):
     learning_rate = 0.003
     num_epochs = 1500
 
-    # Split the embeddings and labels into chunks
-    chunk_size = 350  # 2070ti could hold ~376.72 chunks
-    train_embeddings_chunks = torch.split(train_embeddings, chunk_size)
-    val_embeddings_chunks = torch.split(val_embeddings, chunk_size)
-    train_labels_chunks = torch.split(train_labels, chunk_size)
-    val_labels_chunks = torch.split(val_labels, chunk_size)
+    model = LinearClassifier(embedding_size, num_classes).to(device)
 
-    # Create a separate model for each chunk
-    models = []
-    for _ in range(len(train_embeddings_chunks)):
-        model = LinearClassifier(embedding_size, num_classes).to(device)
-        models.append(model)
-
-    # Define the loss function and optimizer for each model
+    # Define the loss function and optimizer
     criterion = nn.BCEWithLogitsLoss()
-    optimizers = [optim.Adam(model.parameters(), lr=learning_rate) for model in models]
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     # Training loop
     train_accuracies = []
     val_accuracies = []
     epochs = []
-
+    
     for epoch in range(num_epochs):
-        for model in models:
-            model.train()  # Set the model to training mode
+        # Reset model back to training mode
+        model.train() 
 
-        for i in range(len(train_embeddings_chunks)):
-            train_embeddings_chunk = train_embeddings_chunks[i].to(device)
-            train_labels_chunk = train_labels_chunks[i].to(device)
-            model = models[i]
-            optimizer = optimizers[i]
+        # Forward pass
+        outputs = model(train_embeddings.to(device))
+        loss = criterion(outputs, nn.functional.one_hot(train_labels.to(device), num_classes=num_classes).float())
 
-            # Forward pass
-            outputs = model(train_embeddings_chunk)
-            loss = criterion(outputs, nn.functional.one_hot(train_labels_chunk, num_classes=num_classes).float())
+        # Backward pass and optimization
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
-            # Backward pass and optimization
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+        # Evaluate training accuracy
+        model.eval()  # Set the model to evaluation mode
 
-        if epoch % 50 == 0:  # Record validation accuracy for every 50 epochs
+        if epoch % 50 == 0: # Record validation accuracy for every 50 epochs
             epochs.append(epoch)
-            train_accuracy = 0.0
-            val_accuracy = 0.0
-
             with torch.no_grad():
-                for i in range(len(train_embeddings_chunks)):
-                    train_embeddings_chunk = train_embeddings_chunks[i].to(device)
-                    train_labels_chunk = train_labels_chunks[i].to(device)
-                    model = models[i]
-                    model.eval()  # Set the model to evaluation mode
-
-                    train_outputs = model(train_embeddings_chunk)
-                    train_predicted = torch.argmax(torch.sigmoid(train_outputs), dim=1)
-                    train_accuracy += (train_predicted == train_labels_chunk).sum().item()
-
-                train_accuracy /= len(train_labels)
+                train_outputs = model(train_embeddings.to(device))
+                train_predicted = torch.argmax(torch.sigmoid(train_outputs), dim=1)
+                train_accuracy = (train_predicted == train_labels.to(device)).sum().item() / len(train_labels)
                 train_accuracies.append(train_accuracy)
 
-                for i in range(len(val_embeddings_chunks)):
-                    val_embeddings_chunk = val_embeddings_chunks[i].to(device)
-                    val_labels_chunk = val_labels_chunks[i].to(device)
-                    model = models[i]
-                    model.eval()  # Set the model to evaluation mode
-
-                    outputs = model(val_embeddings_chunk)
-                    predicted = torch.argmax(torch.sigmoid(outputs), dim=1)
-                    val_accuracy += (predicted == val_labels_chunk).sum().item()
-
-                val_accuracy /= len(val_labels)
+                # Evaluate the model on the validation set
+                outputs = model(val_embeddings.to(device))
+                predicted = torch.argmax(torch.sigmoid(outputs), dim=1)
+                val_accuracy = (predicted == val_labels.to(device)).sum().item() / len(val_labels)
                 val_accuracies.append(val_accuracy)
 
                 print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}, Training Accuracy: {train_accuracy:.4f}, Val Accuracy: {val_accuracy:.4f}")
-    # END OF NEW SCHEME
-             
-#     # Set device
-#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-#     # Set the hyperparameters
-#     embedding_size = embeddings_matrix.shape[1]
-#     num_classes = len(torch.unique(labels_matrix))
-#     learning_rate = 0.003
-#     num_epochs = 1500
+    print("Model Training Complete.")
 
-#     model = LinearClassifier(embedding_size, num_classes).to(device)
-
-#     # Define the loss function and optimizer
-#     criterion = nn.BCEWithLogitsLoss()
-#     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-
-#     # Training loop
-#     train_accuracies = []
-#     val_accuracies = []
-#     epochs = []
-    
-#     for epoch in range(num_epochs):
-#         # Reset model back to training mode
-#         model.train() 
-
-#         # Forward pass
-#         outputs = model(train_embeddings.to(device))
-#         loss = criterion(outputs, nn.functional.one_hot(train_labels.to(device), num_classes=num_classes).float())
-
-#         # Backward pass and optimization
-#         optimizer.zero_grad()
-#         loss.backward()
-#         optimizer.step()
-
-#         # Evaluate training accuracy
-#         model.eval()  # Set the model to evaluation mode
-
-#         if epoch % 50 == 0: # Record validation accuracy for every 50 epochs
-#             epochs.append(epoch)
-#             with torch.no_grad():
-#                 train_outputs = model(train_embeddings.to(device))
-#                 train_predicted = torch.argmax(torch.sigmoid(train_outputs), dim=1)
-#                 train_accuracy = (train_predicted == train_labels.to(device)).sum().item() / len(train_labels)
-#                 train_accuracies.append(train_accuracy)
-
-#                 # Evaluate the model on the validation set
-#                 outputs = model(val_embeddings.to(device))
-#                 predicted = torch.argmax(torch.sigmoid(outputs), dim=1)
-#                 val_accuracy = (predicted == val_labels.to(device)).sum().item() / len(val_labels)
-#                 val_accuracies.append(val_accuracy)
-
-#                 print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}, Training Accuracy: {train_accuracy:.4f}, Val Accuracy: {val_accuracy:.4f}")
-
-#     print("Model Training Complete.")
-
-#     # Create plot for training and validation accuracies
-#     plt.figure()
-#     plt.plot(epochs, train_accuracies, label="Training Accuracy")
-#     plt.plot(epochs, val_accuracies, label="Validation Accuracy")
-#     plt.xlabel("Epoch")
-#     plt.ylabel("Accuracy")
-#     plt.legend()
-#     plt.show()
-#     plt.savefig("accuracy_plot.png")
+    # Create plot for training and validation accuracies
+    plt.figure()
+    plt.plot(epochs, train_accuracies, label="Training Accuracy")
+    plt.plot(epochs, val_accuracies, label="Validation Accuracy")
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.legend()
+    plt.show()
+    plt.savefig("accuracy_plot.png")
     
 # if __name__ == "__main__":
 #     input_path = '/home/ko.hyeonmok/local_testing/VLM_interpretability/data/tinyimagenet_long_words/'
@@ -477,6 +503,7 @@ def run(input_path):
 
     
 if __name__ == "__main__":
+    torch.cuda.empty_cache()
     setup()
     input_path = '/home/ko.hyeonmok/local_testing/VLM_interpretability/data/tinyimagenet_long_words/'
     run(input_path)
