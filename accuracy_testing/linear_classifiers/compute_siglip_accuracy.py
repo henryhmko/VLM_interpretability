@@ -38,7 +38,7 @@ def get_all_labels(input_fp):
     integer_labels = [label_mapping[label] for label in labels_strings]
     # Convert label matrix to tensor
     labels = torch.tensor(integer_labels)
-    return labels
+    return labels[:10]
 
 def run(input_dir):
     '''Computes accuracy of linear classifier on siglip embeddings.'''
@@ -56,6 +56,7 @@ def run(input_dir):
     img_paths = os.listdir(img_dir)
     img_paths = sorted(img_paths)
     img_paths = [os.path.join(img_dir, img_path) for img_path in img_paths]
+    img_paths = img_paths[:10]
     for img_path in tqdm(img_paths, desc="Generating All Image Embeddings"):
         # Generate embedding
         embedding = get_image_embeddings(img_path, model, processor)
@@ -94,6 +95,8 @@ def run(input_dir):
     # Set the hyperparameters
     embedding_size = embeddings_matrix.shape[1]
     num_classes = len(torch.unique(labels_matrix))
+    print(f"embedding_shape is : {embeddings_matrix.shape}")
+    print(f"embedding_size is : {embedding_size}")
     learning_rate = 0.003
     num_epochs = 1500
 
@@ -114,6 +117,8 @@ def run(input_dir):
 
         # Forward pass
         outputs = model(train_embeddings.to(device))
+        print(f"train_labels: {train_labels}")
+        print(f"train_labels dtype: {train_labels.dtype}")
         loss = criterion(outputs, nn.functional.one_hot(train_labels.to(device), num_classes=num_classes).float())
 
         # Backward pass and optimization
