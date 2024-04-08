@@ -193,10 +193,10 @@ def run(input_dir,
         
         # Save img_with_text to output_dir and append labels to array storing all labels
         new_img_name = f"with_text_{os.path.basename(img_path)}"
-        file_extension_type = os.path.splitext(new_img_name)[-1]
-        # If .jpeg, change to png. Conversion is necessary to save images of RGBA format
-        if file_extension_type.lower() == '.jpeg':
-            new_img_name = new_img_name[:-5] + '.png'
+        file_name, file_extension_type = os.path.splitext(new_img_name)
+        # If not png, change to png. Conversion is necessary to save images of RGBA format
+        if file_extension_type.lower() != '.png':
+            new_img_name = file_name + '.png'
         output_img_path = os.path.join(output_imgdir, new_img_name)
         img_with_text.save(output_img_path)
         json_arr.append(labels_dict)
@@ -256,7 +256,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    words = ["cat", "dog", "fox", "rat", "pet"]
+    # words = ["cat", "dog", "fox", "rat", "pet"] # easy 5 words
+    words = ["creative", "notebook", "strategy", "discover", "activity"] #hard 5 words
     
     run(args.input_path,
         args.output_path,
