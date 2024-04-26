@@ -263,8 +263,6 @@ def run(input_dir, output_dir, words, font_path, rand_position=True, rand_rotati
     json_arr = []
     embeddings_matrix = torch.Tensor()
     img_paths = get_img_paths(input_dir)
-    img_paths = img_paths[:10] #for testing purposes
-    print(img_paths)
 
     print("Creating Dataset and Generating Embeddings...")
     for img_path in tqdm(img_paths, desc="Processing Images"):
