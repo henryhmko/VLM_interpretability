@@ -124,8 +124,13 @@ class LinearClassifier(nn.Module):
 def get_img_paths(input_dir):
     '''Helper function.
     Returns all image paths in the given directory.'''
-    images = os.listdir(input_dir)
-    images = [os.path.join(input_dir, img_path) for img_path in images if not img_path.startswith('.')]
+    #images = os.listdir(input_dir)
+    #images = [os.path.join(input_dir, img_path) for img_path in images if not img_path.startswith('.')]
+    images = []
+    for root, _, fs in os.walk(input_dir):
+        for f in fs:
+            if not f.startswith("."):
+                images.append(os.path.join(root,f))
     # Sorting images is needed to keep a consistent order
     images = sorted(images)
     return images
