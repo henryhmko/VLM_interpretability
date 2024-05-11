@@ -1,8 +1,16 @@
 import numpy as np
 from tqdm.auto import tqdm
+
+import functools
+import time
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
+
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
+
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader, TensorDataset
@@ -181,7 +189,7 @@ def get_text_position(img, rand_word, font):
     y += int(text_length)
     return x, y
 
-def place_text_on_img(img_path, rand_word, rand_position, rand_rotation, rand_font_size, rand_color, font_path, img_size=400, min_font_size=30, max_font_size=100):
+def place_text_on_img(img, rand_word, rand_position, rand_rotation, rand_font_size, rand_color, font_path, img_size=400, min_font_size=30, max_font_size=100):
     '''Writes passed in text on the given image. Saves all parameters
     such as rotation degree, position, font size.
     
@@ -194,7 +202,8 @@ def place_text_on_img(img_path, rand_word, rand_position, rand_rotation, rand_fo
     # print(img_path)
 
     # "RGBA" format used since the alpha layer will be useful for overlaying text on top
-    with Image.open(img_path).convert("RGBA") as img:
+    #with Image.open(img_path).convert("RGBA") as img:
+    if True:
         # Resize to img_size. Default is (400, 400) to comply with CLIP encoder's restriction size
         img = img.resize((img_size, img_size), resample = Image.Resampling.BICUBIC)
                 
@@ -242,20 +251,41 @@ def place_text_on_img(img_path, rand_word, rand_position, rand_rotation, rand_fo
         overlay = overlay.rotate(angle)
         
         # Paste the rotated overaly onto the original image
-        img = Image.alpha_composite(img, overlay)
+        img = Image.alpha_composite(img, overlay).convert("RGB")
 
         # Create labels, a dictionary containing all parameters
         labels = {}
-        labels["image_id"] = os.path.basename(img_path) # ex:'img1.jpg'
+        #labels["image_id"] = os.path.basename(img_path) # ex:'img1.jpg'
         labels["label"] = rand_word # ex:"cat"
         labels["position"] = (x, y) # ex: (100, 100)
         labels["rotation"] = angle # ex: 90
         labels["color"] = (r,g,b) # ex: (255, 255, 255)
         labels["font_size"] = font_size # ex: 40
         
-        return img, labels
+        return img#, labels
 
-def run(input_dir, output_dir, words, font_path, rand_position=True, rand_rotation=True, rand_font_size=True, rand_color=True):
+
+class ImageDataset(Dataset):
+    def __init__(self, file_paths, words, add_text=None, transform=None):
+        self.file_paths = file_paths
+        self.add_text = add_text
+        self.words = words
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.file_paths)
+
+    def __getitem__(self, idx):
+        image = Image.open(self.file_paths[idx])
+        image = image.convert('RGBA')
+
+        word = self.words[idx%len(self.words)]
+        image = self.transform(self.add_text(image, word))
+
+        return image, word
+
+    
+def run(input_dir, input_dir_val, output_dir, words, font_path, rand_position=True, rand_rotation=True, rand_font_size=True, rand_color=True):
     # Check input_dir is a valid directory
     cur_dir = os.path.dirname(os.getcwd())
     input_dir = os.path.join(cur_dir, input_dir)
@@ -269,63 +299,69 @@ def run(input_dir, output_dir, words, font_path, rand_position=True, rand_rotati
     embeddings_matrix = torch.Tensor()
     img_paths = get_img_paths(input_dir)
 
+    img_paths_val = get_img_paths(input_dir_val)
+
     print("Creating Dataset and Generating Embeddings...")
-    for img_path in tqdm(img_paths, desc="Processing Images"):
-        rand_word = random.choice(words)
-        img_with_text, labels_dict = place_text_on_img(img_path, rand_word, rand_position, rand_rotation, rand_font_size, rand_color, font_path)
-        
-        # Generate embedding for the modified image
-        args = {'model': 'bunny-phi-2-siglip-lora',
-                'prompt': "A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, and detailed answers to the user's questions. \n\n USER: <image>\nWhat is the one word you see on the image, if any? Dummy prompt \n\n ASSISTANT:",
-                'temperature': 0, 'top_p': 0.7, 'max_new_tokens': 128, 'stop': '<|endoftext|>'}
-        args['images'] = [img_with_text]
-        embedding = get_image_embeddings(worker, args)
-        
-        # Currently offloading image embeddings to CPU due to VRAM constraints
-        # TODO: Do this on the GPU if VRAM is not an issue
-        embedding_flatten = embedding.flatten(start_dim=1).to('cpu')
-        embeddings_matrix = torch.cat((embeddings_matrix, embedding_flatten), dim=0).to('cpu')
 
-        json_arr.append(labels_dict)
+    transform = transforms.Compose([
+        transforms.Resize((384, 384)),
+        transforms.ToTensor(),
+    ])
 
-    print("Generated All Image Embeddings.")
-    labels_matrix = get_all_labels(json_arr)
-    print("Generated All Image Labels.")
+    dataset = ImageDataset(img_paths,
+                           words=words,
+                           add_text=functools.partial(place_text_on_img, rand_position=rand_position, rand_rotation=rand_rotation, rand_font_size=rand_font_size, rand_color=rand_color, font_path=font_path),
+                           transform=transform)
+    val_dataset = ImageDataset(img_paths_val,
+                           words=words,
+                           add_text=functools.partial(place_text_on_img, rand_position=rand_position, rand_rotation=rand_rotation, rand_font_size=rand_font_size, rand_color=rand_color, font_path=font_path),
+                           transform=transform)
+
+    batch_size = 32
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+
+    
+    val_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+
+    class MyModel(nn.Module):
+        def __init__(self, model):
+            super(MyModel, self).__init__()
+            self.model = model
+
+        def forward(self, images):
+            return self.model.encode_images(images)
+            
+
+    print("Distributing model across GPUs...")
+    model_par = nn.DataParallel(worker.model.get_vision_tower())
+    model_par.to('cuda')
+    print("Distributed model across GPUs.")
+
+
 
     #### LINEAR CLASSIFIER HYPERPARAMETERS ####
     BATCH_SIZE = 64
-    LR = 1e-3
+    LR = 1e-5
     NUM_EPOCHS = 500
     ###########################################
-    
-    # Train-test split
-    train_embeddings, val_embeddings, train_labels, val_labels = train_test_split(
-        embeddings_matrix, labels_matrix, test_size=0.2
-    )
-    
-    # Create Dataset
-    train_dataset = TensorDataset(train_embeddings, train_labels)
-    val_dataset = TensorDataset(val_embeddings, val_labels)
-
-    # Create Dataloader
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE) 
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE)
 
     # Set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device == "cpu":
         warnings.warn("Training starting on the CPU. Assign available GPUs if this was not intended.", RuntimeWarning)
 
+    
     # Get num_imgs, embedding_size, total number of classes
     num_imgs = embeddings_matrix.shape[0]
-    embedding_size = embeddings_matrix.shape[1]
-    num_classes = len(torch.unique(labels_matrix))
+    embedding_size = 729 * 1152
+    num_classes = len(words)
 
     # Create model
     model = LinearClassifier(embedding_size, num_classes).to(device)
 
     # Define the loss function and optimizer
-    criterion = nn.BCEWithLogitsLoss() # Use BCEWithLogits
+    #criterion = nn.BCEWithLogitsLoss() # Use BCEWithLogits
+    criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=LR)
 
     # Training loop
@@ -335,47 +371,56 @@ def run(input_dir, output_dir, words, font_path, rand_position=True, rand_rotati
 
     for epoch in tqdm(range(NUM_EPOCHS), desc="Training model..."):
         model.train() # Revert back to model.train() after validation
-        for batch_data, batch_labels in train_loader:
-            batch_data = batch_data.to(device)
-            batch_labels = batch_labels.to(device)
 
-            outputs = model(batch_data)
-            loss = criterion(outputs, nn.functional.one_hot(batch_labels, num_classes=num_classes).float())
+
+        accuracy = []
+        losses = []
+        for images, labels in data_loader:
+            embed_data = model_par(images.half())
+            embed_data = embed_data.reshape((embed_data.shape[0], -1))
+            batch_labels = torch.tensor([words.index(x) for x in labels]).to(device)
+
+            outputs = model(embed_data)
+        
+            accuracy.append(np.mean(outputs.argmax(1).cpu().numpy() == batch_labels.cpu().numpy()))
+            #print(accuracy[-1])
+            #loss = criterion(outputs, nn.functional.one_hot(batch_labels, num_classes=num_classes).float())
+            loss = criterion(outputs, batch_labels).float()
+            #print("out", outputs[0])
+            #print("loss", loss)
+            losses.append(loss.item())
             
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
+            if len(losses) == 100:
+                print(np.mean(losses), np.mean(accuracy))
+                losses = []
+                accuracy = []
+
         # Validation - Record every 5 epochs
-        if epoch % 5 == 0:
+        if epoch % 1 == 0:
             model.eval()
             epochs.append(epoch)
             with torch.no_grad():
                 # Compute train accuracy first
-                total_train_accuracy = []
                 total_val_accuracy = []
-                for batch_data, batch_labels in train_loader:
-                    batch_data = batch_data.to(device)
-                    batch_labels = batch_labels.to(device)
-
-                    train_outputs = model(batch_data)
-                    train_predicted = torch.argmax(torch.sigmoid(train_outputs), dim=1)
-                    train_accuracy = (train_predicted == batch_labels.to(device)).sum().item() / len(batch_labels)
-                    total_train_accuracy.append(train_accuracy)
-                avg_train_accuracy = np.mean(total_train_accuracy)
-                train_accuracies.append(avg_train_accuracy)
                 
                 # Compute validation accuracy
-                for batch_data, batch_labels in val_loader:
-                    batch_data = batch_data.to(device)
-                    batch_labels = batch_labels.to(device)
+                for images, labels in val_loader:
+                    batch_data = model_par(images.half())
+                    batch_data = batch_data.reshape((batch_data.shape[0], -1))
+                    batch_labels = torch.tensor([words.index(x) for x in labels]).to(device)
 
                     val_outputs = model(batch_data)
                     val_predicted = torch.argmax(torch.sigmoid(val_outputs), dim=1)
                     val_accuracy = (val_predicted == batch_labels.to(device)).sum().item() / len(batch_labels)
                     total_val_accuracy.append(val_accuracy)
                 avg_val_accuracy = np.mean(total_val_accuracy)
+                print("Validation accuracy", avg_val_accuracy)
                 val_accuracies.append(avg_val_accuracy)
+        torch.save(model.state_dict(), "/tmp/model_xe.pt")
     print("Model Training Complete")
 
     save_path = os.path.join(new_output_dir, 'classifier_weights.pth')
@@ -401,8 +446,17 @@ if __name__ == "__main__":
         "--input_path",
         type = str,
         default = "Bunny/bunny/serve/examples",
-        help = "Input directory where all images are stored"
+        help = "Input directory where all train images are stored"
     )
+
+    parser.add_argument(
+        "-v",
+        "--input_path_val",
+        type = str,
+        default = "Bunny/bunny/serve/examples",
+        help = "Input directory where all validation images are stored"
+    )
+    
     parser.add_argument(
         "-o",
         "--output_path",
@@ -449,4 +503,4 @@ if __name__ == "__main__":
     print(f"Using {n_gpus} GPUs.")
     setup()
 
-    run(args.input_path, args.output_path, words, args.font_path, args.rand_position, args.rand_rotation, args.rand_font_size, args.rand_color)
+    run(args.input_path, args.input_path_val, args.output_path, words, args.font_path, args.rand_position, args.rand_rotation, args.rand_font_size, args.rand_color)
