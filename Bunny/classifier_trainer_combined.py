@@ -52,34 +52,6 @@ class ModelWorker:
             model_path, model_base, self.model_name, model_type, load_8bit, load_4bit, device=self.device)
         self.is_multimodal = True
 
-
-def get_image_embeddings(self, params):
-    '''Helper function.
-    Returns embeddings of a single image that is passed through the encoder+MLP'''
-    
-    tokenizer, model, image_processor = self.tokenizer, self.model, self.image_processor
-
-    prompt = params["prompt"]
-
-    images = params.get("images", None)
-    # images = torch.cat([images]*40, 0)
-    images = process_images(images, image_processor, model.config)
-    # images = torch.cat([images]*40, 0)
-    images = images.to(self.model.device, dtype=model.dtype)
-
-    input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).to(
-        self.device)
-
-    emb = model.prepare_inputs_labels_for_multimodal(
-        input_ids,
-        None,
-        None,
-        None,
-        None,
-        images=images
-    )[4]
-    return emb
-
 #@wrap
 def setup():
     global worker
@@ -98,25 +70,6 @@ def setup():
                          False,                     # load_8bit (assuming default as False)
                          False,                     # load_4bit (assuming default as False)
                          "cuda")                    # device
-
-
-def get_all_labels(input_dict):
-    '''Helper function.
-    Returns torch tensor containing all the lables in class integers when given the
-    json arr containing all labels of the dataset.'''
-    # with open(input_fp, 'r') as file:
-    #     data = json.load(file)
-    # Extract only the labels from all the entries
-    labels_strings = [item['label'] for item in input_dict]
-    
-    # Prepare a mapping from the strings to the class integer values
-    label_mapping = {label: idx for idx, label in enumerate(set(labels_strings))}
-    # Convert label strings("cat", "fox",...) into class numbers(e.g. 0, 1, 2,...)
-    integer_labels = [label_mapping[label] for label in labels_strings]
-    # Convert label matrix to tensor
-    labels = torch.tensor(integer_labels)
-    # return labels
-    return labels
 
 # Build model
 class LinearClassifier(nn.Module):
@@ -295,8 +248,6 @@ def run(input_dir, input_dir_val, output_dir, words, font_path, rand_position=Tr
     if not os.path.exists(new_output_dir):
         os.makedirs(new_output_dir)
     
-    json_arr = []
-    embeddings_matrix = torch.Tensor()
     img_paths = get_img_paths(input_dir)
 
     img_paths_val = get_img_paths(input_dir_val)
@@ -319,9 +270,7 @@ def run(input_dir, input_dir_val, output_dir, words, font_path, rand_position=Tr
 
     batch_size = 32
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-
-    
-    val_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
 
     class MyModel(nn.Module):
         def __init__(self, model):
@@ -352,7 +301,6 @@ def run(input_dir, input_dir_val, output_dir, words, font_path, rand_position=Tr
 
     
     # Get num_imgs, embedding_size, total number of classes
-    num_imgs = embeddings_matrix.shape[0]
     embedding_size = 729 * 1152
     num_classes = len(words)
 
@@ -414,7 +362,7 @@ def run(input_dir, input_dir_val, output_dir, words, font_path, rand_position=Tr
                     batch_labels = torch.tensor([words.index(x) for x in labels]).to(device)
 
                     val_outputs = model(batch_data)
-                    val_predicted = torch.argmax(torch.sigmoid(val_outputs), dim=1)
+                    val_predicted = torch.argmax(val_outputs, dim=1)
                     val_accuracy = (val_predicted == batch_labels.to(device)).sum().item() / len(batch_labels)
                     total_val_accuracy.append(val_accuracy)
                 avg_val_accuracy = np.mean(total_val_accuracy)
